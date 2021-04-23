@@ -9,6 +9,8 @@ namespace D2RSaveFix
         private const byte UNLOCK_DIFFICULTIES_BYTE = 8;
         private const int UNLOCK_DIFFICULTIES_POS = 37;
         private const int QUEST_DATA_POS = 345;
+        private static readonly int[] KURAST_DOCK_WP_POS = { 645, 669, 693 };
+        private const byte UNLOCK_KURAST_DOCK_WP_BYTE = 4;
 
         private static readonly byte[] QUEST_DATA = new byte[]
         {
@@ -63,6 +65,12 @@ namespace D2RSaveFix
             {
                 if (QUEST_DATA[i] == 0) continue;
                 fileData[QUEST_DATA_POS + i] |= QUEST_DATA[i];
+            }
+
+            // 解锁Kurast Docks路点
+            foreach (var pos in KURAST_DOCK_WP_POS)
+            {
+                fileData[pos] |= UNLOCK_KURAST_DOCK_WP_BYTE;
             }
 
             // Checksum
