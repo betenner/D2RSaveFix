@@ -160,7 +160,7 @@ namespace D2RSaveFix
             rawSaveFile[CHARACTER_PROGRESSION_OFFSET] |= GAME_COMPLETED_ON_NORMAL;
 
             // 完成所有A2
-            CompleteAllA2(rawSaveFile);
+            //CompleteAllA2(rawSaveFile);
 
             // 解锁所有A3WP1
             EnableA3WP1(rawSaveFile);
