@@ -5,24 +5,44 @@ namespace D2RSaveFix
 {
     class Program
     {
-        private const int HEADER_LENGTH = 765;
-        private const byte UNLOCK_DIFFICULTIES_BYTE = 8;
-        private const int UNLOCK_DIFFICULTIES_POS = 37;
-        private const int QUEST_DATA_POS = 345;
-        private static readonly int[] KURAST_DOCK_WP_POS = { 645, 669, 693 };
-        private const byte UNLOCK_KURAST_DOCK_WP_BYTE = 4;
+        private const byte GAME_COMPLETED_ON_NORMAL = 0x08;
 
-        private static readonly byte[] QUEST_DATA = new byte[]
+        private const int CHARACTER_PROGRESSION_OFFSET = 0x25;
+        private const int CHECKSUM_OFFSET = 0x0C;
+
+        private const int QUESTS_SECTION_OFFSET = 0x014F;
+
+        private const byte WAYPOINTS_A3WP1_ENABLED = 0x04;
+        private const int WAYPOINTS_SECTION_OFFSET = 0x0279;
+        private const int WAYPOINTS_DATA_OFFSET = 0x08;
+        private const int WAYPOINTS_DIFFICULTY_OFFSET = 0x18;
+
+        private const int HEADER_LENGTH = 765;
+
+        private enum Difficulty
         {
-            1,0,12,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,29,144,121,28,253,159,253,159,253,159,229,31,1,
-            0,1,0,0,0,1,16,0,0,0,0,0,0,1,26,1,0,1,0,12,0,1,18,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-            0,0,0,0,0,0,0,0,0,193,20,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,253,159,253,159,253,159,253,
-            159,253,159,253,159,1,0,1,0,29,144,121,28,253,159,253,159,253,159,229,31,1,0,1,0,0,0,
-            1,0,0,0,0,0,0,0,1,10,1,0,1,0,4,0,1,2,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-            0,0,193,20,1,128,0,0,0,0,0,0,0,0,0,0,0,0,1,0,253,159,253,159,253,159,253,159,253,159,
-            253,159,1,0,1,0,29,144,121,28,253,159,253,159,253,159,229,31,1,0,1,0,0,0,1,0,0,0,1,0,
-            0,0,1,2,1,0,1,0,12,0,1,19,1,16,1,0,0,0,0,0,0,0,0,0,0,0,0,0,12,0,0,0,0,0,0,0,0,0,0,0,
-            1,128,0,0,0,0,0,0,0,0,0,0,0,0
+            Normal,
+            Nightmare,
+            Hell
+        }
+
+        private enum Act
+        {
+            TheSightlessEye,
+            SecretOfTheVizjerei,
+            TheInfernalGate,
+            TheHarrowing,
+            LordOfDestruction
+        };
+
+        private enum Quest
+        {
+            FirstQuest,
+            SecondQuest,
+            ThirdQuest,
+            FourthQuest,
+            FifthQuest,
+            SixthQuest
         };
 
         static void Main(string[] args)
@@ -49,7 +69,7 @@ namespace D2RSaveFix
             // 版本检查
             if (!VersionCheck(fileData))
             {
-                Console.WriteLine("非法D2R存档文件！\n按任意键关闭");
+                Console.WriteLine("非法D2R存档文件！ 按任意键关闭");
                 Console.ReadKey();
                 return;
             }
@@ -57,36 +77,23 @@ namespace D2RSaveFix
             // 备份
             MakeBackup(fileData, file);
 
-            // 解锁难度
-            fileData[UNLOCK_DIFFICULTIES_POS] = (byte)(fileData[UNLOCK_DIFFICULTIES_POS] | UNLOCK_DIFFICULTIES_BYTE);
-
-            // 解锁章节
-            for (int i = 0; i < QUEST_DATA.Length; i++)
-            {
-                if (QUEST_DATA[i] == 0) continue;
-                fileData[QUEST_DATA_POS + i] |= QUEST_DATA[i];
-            }
-
-            // 解锁Kurast Docks路点
-            foreach (var pos in KURAST_DOCK_WP_POS)
-            {
-                fileData[pos] |= UNLOCK_KURAST_DOCK_WP_BYTE;
-            }
+            // 解锁
+            UnlockGame(fileData);
 
             // Checksum
-            UpdateChecksum(fileData, 12);
+            UpdateChecksum(fileData, CHECKSUM_OFFSET);
 
             // 写入
             fs.Seek(0, SeekOrigin.Begin);
             fs.Write(fileData, 0, fileData.Length);
             fs.Flush();
-            Console.WriteLine("所有难度与章节解锁成功!\n按任意键关闭");
+            Console.WriteLine("操作成功! 按任意键关闭");
             Console.ReadKey();
         }
 
         private static void ShowUsage()
         {
-            Console.WriteLine("将D2R存档文件(*.d2s)拖到此程序上以解锁该存档的所有难度与章节并可进行单机游戏\n按任意键关闭");
+            Console.WriteLine("将D2R存档文件(*.d2s)拖到此程序上以实现：\n1. 标记该存档为已经完成普通难度（可进行单机游戏）\n2. 完成所有难度A2最后一个任务（可进入A3）\n3. 解锁所有难度A3第一个路点\n\n按任意键关闭");
             Console.ReadKey();
         }
 
@@ -111,6 +118,114 @@ namespace D2RSaveFix
                 || data[3] != 0xaa) return false;
             if (data[4] < 0x61) return false;
             return true;
+        }
+
+        private static void EnableA3WP1(byte[] rawSaveFile)
+        {
+            for (int difficulty = 0; difficulty < 3; difficulty++)
+            {
+                int firstWpOffset = WAYPOINTS_SECTION_OFFSET +
+                    WAYPOINTS_DATA_OFFSET + difficulty * WAYPOINTS_DIFFICULTY_OFFSET;
+                rawSaveFile[firstWpOffset + 4] |= WAYPOINTS_A3WP1_ENABLED;
+            }
+        }
+
+        private static void AllowTravelToNextAct(Difficulty difficulty, Act act, byte[] rawSaveFile)
+        {
+            if (act != Act.TheHarrowing)
+            {
+                ChangeQuest(difficulty, act, Quest.SixthQuest, true, rawSaveFile);
+            }
+            else
+            {
+                ChangeQuest(difficulty, act, Quest.SecondQuest, true, rawSaveFile);
+            }
+        }
+
+        private static void CompleteA2(Difficulty difficulty, byte[] rawSaveFile)
+        {
+            AllowTravelToNextAct(difficulty, Act.SecretOfTheVizjerei, rawSaveFile);
+        }
+        
+        private static void CompleteAllA2(byte[] rawSaveFile)
+        {
+            CompleteA2(Difficulty.Normal, rawSaveFile);
+            CompleteA2(Difficulty.Nightmare, rawSaveFile);
+            CompleteA2(Difficulty.Hell, rawSaveFile);
+        }
+
+        private static void UnlockGame(byte[] rawSaveFile)
+        {
+            // 完成普通难度
+            rawSaveFile[CHARACTER_PROGRESSION_OFFSET] |= GAME_COMPLETED_ON_NORMAL;
+
+            // 完成所有A2
+            CompleteAllA2(rawSaveFile);
+
+            // 解锁所有A3WP1
+            EnableA3WP1(rawSaveFile);
+        }
+
+        private static int GetQuestOffset(Difficulty difficulty, Act act, Quest quest)
+        {
+            int offset = -1;
+
+            if (act != Act.TheHarrowing || quest < Quest.FourthQuest)
+            {
+                offset = 12;                    // 10 bytes for the quest header, 2 bytes for the act introduction
+
+                offset += (int)difficulty * 96; // choose to the right difficulty
+                offset += (int)act * 16;        // choose to the right act
+                offset += (int)quest * 2;       // choose the right quest
+
+                if (act == Act.LordOfDestruction)
+                {
+                    offset += 4;                // there are additional bytes in act 4
+                }
+            }
+
+            return offset;
+        }
+
+        private static void ChangeQuest(Difficulty difficulty, Act act, Quest quest, bool complete, byte[] rawSaveFile)
+        {
+            int offset = QUESTS_SECTION_OFFSET + GetQuestOffset(difficulty, act, quest);
+
+            if (offset == -1)
+            {
+                return;
+            }
+
+            if (complete)
+            {
+                rawSaveFile[offset] = 0x01;     // Quest complete
+                rawSaveFile[offset + 1] = 0x10; // Quest log animation viewed
+
+                if (act == Act.LordOfDestruction && quest == Quest.ThirdQuest)
+                {
+                    // Scroll of resist
+                    rawSaveFile[offset] += 0xC0;
+                }
+            }
+            else
+            {
+                rawSaveFile[offset] = 0;
+                rawSaveFile[offset + 1] = 0;
+            }
+
+            // Allow travel to the next act.
+            // For Act4, the diablo quest is quest2
+            if (complete && (quest == Quest.SixthQuest || (act == Act.TheHarrowing && quest == Quest.SecondQuest)))
+            {
+                if (act != Act.TheHarrowing)
+                {
+                    rawSaveFile[offset + 2] = 1;
+                }
+                else
+                {
+                    rawSaveFile[offset + 4] = 1;
+                }
+            }
         }
 
         private static void UpdateChecksum(byte[] fileData, int checkSumOffset)
